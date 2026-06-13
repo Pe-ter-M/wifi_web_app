@@ -1,0 +1,52 @@
+sql {
+    driver = "rlm_sql_postgresql"
+    dialect = "postgresql"
+
+    # Connection info
+    server = "postgres"
+    port = 5432
+    login = "radius"
+    password = "radpass"
+    radius_db = "radius"
+
+    # Connection pool
+    max_connections = 16
+    min_connections = 4
+    max_queries = 0          # unlimited per connection
+    lifetime = 0             # never recycle
+
+    # Query timeout
+    query_timeout = 5
+
+    # NAS table query
+    nas_table = "nas"
+
+    # Accounting table
+    acct_table1 = "radacct"
+    acct_table2 = "radacct"
+
+    # Post-auth table
+    postauth_table = "radpostauth"
+
+    # Auth check/reply tables
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+
+    # Deleted attribute handling
+    delete_expired_users = true
+
+    # Use fast queries (prepared statements)
+    read_clients = yes
+
+    # Client table name
+    client_table = "nas"
+
+    # Group attribute (used in group check/reply queries)
+    group_attribute = "Group-Name"
+
+    # Read queries from external file
+    $INCLUDE ${modconfdir}/${.:instance}/main/${dialect}/queries.conf
+}

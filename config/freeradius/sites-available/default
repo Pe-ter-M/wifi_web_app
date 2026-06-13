@@ -1,0 +1,85 @@
+server default {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 0
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    listen {
+        type = acct
+        ipaddr = *
+        port = 0
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    authorize {
+        filter_username
+
+        preprocess
+
+        auth_log
+
+        suffix
+
+        # Load check items from SQL first (returns Expiration as text)
+        sql
+
+        # Then evaluate Expiration against current time
+        expiration
+
+        if (notfound) {
+            reject
+        }
+
+        if (userlock) {
+            reject
+        }
+
+        pap
+    }
+
+    authenticate {
+        # PAP auth — validates Cleartext-Password/ Crypt-Password
+        # against User-Password in the Access-Request
+        Auth-Type PAP {
+            pap
+        }
+    }
+
+    preacct {
+        preprocess
+        acct_counters64
+        suffix
+    }
+
+    accounting {
+        radutmp
+        sql
+        exec
+        attr_filter.accounting_response
+    }
+
+    post-auth {
+        # Log every auth attempt to radpostauth
+        sql
+        exec
+        Post-Auth-Type REJECT {
+            attr_filter.access_reject
+        }
+    }
+
+    pre-proxy {
+    }
+
+    post-proxy {
+    }
+}

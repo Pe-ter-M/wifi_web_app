@@ -1,0 +1,16 @@
+{
+  "company": {
+    "name": "Phantom Internet Providers",
+    "short_name": "PhantomNet",
+    "tagline": "Connect with confidence",
+    "currency": "KSH",
+    "currency_symbol": "KSh",
+    "support_email": "support@phantomnet.co.ke",
+    "support_phone": "+254 700 000000"
+  },
+  "defaults": {
+    "session_timeout": 86400,
+    "idle_timeout": 600,
+    "max_devices": 1
+  }
+}

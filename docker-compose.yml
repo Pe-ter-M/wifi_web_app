@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: phantom-pg
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-radius}
+      POSTGRES_USER: ${POSTGRES_USER:-radius}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radpass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radius -d radius"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - phantom-net
+
+  freeradius:
+    build:
+      context: .
+      dockerfile: Dockerfile.freeradius
+    container_name: phantom-radius
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+    volumes:
+      # Mount config files on top of the Debian image's config directory
+      - ./config/freeradius/clients.conf:/etc/raddb/clients.conf:ro
+      - ./config/freeradius/mods-available/sql:/etc/raddb/mods-available/sql:ro
+      - ./config/freeradius/sites-available/default:/etc/raddb/sites-available/default:ro
+    environment:
+      - RADIUS_KEY=${RADIUS_KEY:-testing123}
+    networks:
+      - phantom-net
+
+  billing-api:
+    build:
+      context: ./packages/api
+      dockerfile: Dockerfile
+    container_name: phantom-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radius}:${POSTGRES_PASSWORD:-radpass}@postgres:5432/${POSTGRES_DB:-radius}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-radius}:${POSTGRES_PASSWORD:-radpass}@postgres:5432/${POSTGRES_DB:-radius}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      RADIUS_KEY: ${RADIUS_KEY:-testing123}
+    volumes:
+      # Mount app code for hot reload (edit locally, changes reflect in container)
+      - ./packages/api/app:/app/app:ro
+    networks:
+      - phantom-net
+
+  frontend:
+    build:
+      context: ./packages/ui
+      dockerfile: Dockerfile
+    container_name: phantom-ui
+    restart: unless-stopped
+    depends_on:
+      - billing-api
+    ports:
+      - "80:80"
+    networks:
+      - phantom-net
+
+networks:
+  phantom-net:
+    driver: bridge
+
+volumes:
+  pgdata:

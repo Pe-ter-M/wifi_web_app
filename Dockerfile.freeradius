@@ -1,0 +1,11 @@
+# Official FreeRADIUS Debian-based image — has rlm_sql_postgresql.so
+# with libpq.so.5 included. We just enable sql + expiration modules.
+FROM freeradius/freeradius-server:3.2.10
+
+# Enable sql + expiration modules
+RUN ln -sf /etc/raddb/mods-available/sql /etc/raddb/mods-enabled/sql \
+    && ln -sf /etc/raddb/mods-available/expiration /etc/raddb/mods-enabled/expiration
+
+EXPOSE 1812/udp 1813/udp
+
+CMD ["radiusd", "-X"]

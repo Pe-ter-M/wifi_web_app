@@ -1,0 +1,46 @@
+[
+  {
+    "name": "8Mbps",
+    "description": "Basic - 8 Mbps browsing and streaming",
+    "price_cents": 150000,
+    "price_display": 1500,
+    "bandwidth_up": 8192,
+    "bandwidth_down": 8192,
+    "session_timeout": 86400,
+    "idle_timeout": 600,
+    "is_active": true
+  },
+  {
+    "name": "12Mbps",
+    "description": "Standard - 12 Mbps for HD streaming",
+    "price_cents": 200000,
+    "price_display": 2000,
+    "bandwidth_up": 12288,
+    "bandwidth_down": 12288,
+    "session_timeout": 86400,
+    "idle_timeout": 600,
+    "is_active": true
+  },
+  {
+    "name": "15Mbps",
+    "description": "Premium - 15 Mbps for gaming and 4K",
+    "price_cents": 230000,
+    "price_display": 2300,
+    "bandwidth_up": 15360,
+    "bandwidth_down": 15360,
+    "session_timeout": 86400,
+    "idle_timeout": 600,
+    "is_active": true
+  },
+  {
+    "name": "1Hour-Turbo",
+    "description": "Pay-as-you-go - 1 hour high-speed pass",
+    "price_cents": 5000,
+    "price_display": 50,
+    "bandwidth_up": 20480,
+    "bandwidth_down": 20480,
+    "session_timeout": 3600,
+    "idle_timeout": 300,
+    "is_active": true
+  }
+]
