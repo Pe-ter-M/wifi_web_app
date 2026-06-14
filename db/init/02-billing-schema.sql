@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS customers (
     email       text UNIQUE NOT NULL,
     phone       text,
     address     text,
+    is_admin    boolean NOT NULL DEFAULT false,        
+    password_hash text,                                 
     created_at  timestamp with time zone NOT NULL DEFAULT now(),
     updated_at  timestamp with time zone NOT NULL DEFAULT now()
 );
@@ -22,10 +24,13 @@ CREATE TABLE IF NOT EXISTS plans (
     name            text NOT NULL UNIQUE,
     description     text,
     price_cents     integer NOT NULL,              -- price in cents (USD)
+    price_display   float,                         
     bandwidth_up    integer,                       -- Kbps
     bandwidth_down  integer,                       -- Kbps
     session_timeout integer DEFAULT 86400,         -- seconds (default 24h)
     idle_timeout    integer DEFAULT 600,           -- seconds
+    is_active       boolean DEFAULT true,          
+    sort_order      integer DEFAULT 0,             
     created_at      timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -226,11 +231,16 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 
 -- Plans
-INSERT INTO plans (name, description, price_cents, bandwidth_up, bandwidth_down, session_timeout, idle_timeout) VALUES
-    ('10Mbps',   'Basic - 10 Mbps',   1000,   10240,  10240,  86400, 600),
-    ('30Mbps',   'Standard - 30 Mbps', 2000,  30720,  30720,  86400, 600),
-    ('50Mbps',   'Premium - 50 Mbps',  3000,  51200,  51200,  86400, 600)
+INSERT INTO plans (name, description, price_cents, price_display, bandwidth_up, bandwidth_down, session_timeout, idle_timeout, is_active, sort_order) VALUES
+    ('10Mbps',   'Basic - 10 Mbps',   1000, 1000.0, 10240,  10240,  86400, 600, true, 1),
+    ('30Mbps',   'Standard - 30 Mbps', 2000, 2000.0, 30720,  30720,  86400, 600, true, 2),
+    ('50Mbps',   'Premium - 50 Mbps',  3000, 3000.0, 51200,  51200,  86400, 600, true, 3)
 ON CONFLICT (name) DO NOTHING;
+
+-- Default admin user (creates other users via web portal)
+INSERT INTO customers (name, email, phone, is_admin, password_hash) VALUES
+    ('Admin User', 'admin@phantomnet.co.ke', '+254700000000', true, '$2b$12$ugiQqqJ/p0nJOWo9p/UsUOl5u72wxz2w6VeI8KyFk5zj1XClERX8y')
+ON CONFLICT (email) DO NOTHING;
 
 -- Test customer: active subscription
 SELECT create_customer_subscription(
@@ -239,7 +249,7 @@ SELECT create_customer_subscription(
     '+1234567890',
     '30Mbps',
     'test_active',
-    'testpass123',
+    '$2b$12$i0e1PZIaHRxmHWAcrg7WG.9El/UQNQonWK1KRz4j0mcjv7w/rQQHe',
     TRUE,
     2000
 );

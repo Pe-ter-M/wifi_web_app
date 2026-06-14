@@ -185,8 +185,8 @@ Expected:
 
 `docker-compose.yml` currently references:
 
-- `./packages/api`
-- `./packages/ui`
+- `./api_and_ui/api`
+- `./api_and_ui/ui`
 
 In this repository, actual paths are:
 

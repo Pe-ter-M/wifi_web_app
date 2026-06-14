@@ -42,7 +42,7 @@ services:
 
   billing-api:
     build:
-      context: ./packages/api
+      context: ./api_and_ui/api
       dockerfile: Dockerfile
     container_name: phantom-api
     restart: unless-stopped
@@ -58,13 +58,13 @@ services:
       RADIUS_KEY: ${RADIUS_KEY:-testing123}
     volumes:
       # Mount app code for hot reload (edit locally, changes reflect in container)
-      - ./packages/api/app:/app/app:ro
+      - ./api_and_ui/api/app:/app/app:ro
     networks:
       - phantom-net
 
   frontend:
     build:
-      context: ./packages/ui
+      context: ./api_and_ui/ui
       dockerfile: Dockerfile
     container_name: phantom-ui
     restart: unless-stopped
