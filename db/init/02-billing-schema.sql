@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS plans (
     id              serial PRIMARY KEY,
     name            text NOT NULL UNIQUE,
     description     text,
-    price_cents     integer NOT NULL,              -- price in cents (USD)
-    price_display   float,                         
+    price_cents     integer NOT NULL,            
+    price_display   float NOT NULL,                     
     bandwidth_up    integer,                       -- Kbps
     bandwidth_down  integer,                       -- Kbps
     session_timeout integer DEFAULT 86400,         -- seconds (default 24h)
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     username            text NOT NULL,             -- matches radcheck.UserName
     password            text NOT NULL,             -- Cleartext-Password for radcheck
     status              text NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active', 'expired', 'cancelled', 'suspended')),
+                        CHECK (status IN ('trial', 'active', 'expired', 'cancelled', 'suspended')),
     current_period_start timestamp with time zone NOT NULL,
     current_period_end   timestamp with time zone NOT NULL,
     created_at          timestamp with time zone NOT NULL DEFAULT now(),
@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS payments (
     id              serial PRIMARY KEY,
     subscription_id integer NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
     amount_cents    integer NOT NULL,
-    currency        text NOT NULL DEFAULT 'USD',
+    amount_display  float,
+    currency        text NOT NULL DEFAULT 'Ksh',
     payment_method  text NOT NULL DEFAULT 'cash',
     external_ref    text,                           -- payment gateway reference
     paid_at         timestamp with time zone NOT NULL DEFAULT now(),
@@ -127,8 +128,8 @@ BEGIN
     WHERE id = p_subscription_id;
 
     -- Record payment
-    INSERT INTO payments (subscription_id, amount_cents, payment_method, external_ref)
-    VALUES (p_subscription_id, p_amount_cents, p_payment_method, p_external_ref);
+    INSERT INTO payments (subscription_id, amount_cents, amount_display, payment_method, external_ref)
+    VALUES (p_subscription_id, p_amount_cents, p_amount_cents / 100.0, p_payment_method, p_external_ref);
 
     -- Update radcheck.Expiration (upsert)
     INSERT INTO radcheck (UserName, Attribute, op, Value)
@@ -249,7 +250,7 @@ SELECT create_customer_subscription(
     '+1234567890',
     '30Mbps',
     'test_active',
-    '$2b$12$i0e1PZIaHRxmHWAcrg7WG.9El/UQNQonWK1KRz4j0mcjv7w/rQQHe',
+    'active123',
     TRUE,
     2000
 );

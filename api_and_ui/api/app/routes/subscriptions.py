@@ -129,19 +129,19 @@ async def create_subscription(
     sub_result = db.execute(
         text("""
             INSERT INTO subscriptions (customer_id, plan_id, username, password,
-                   current_period_start, current_period_end, status)
+                current_period_start, current_period_end, status)
             VALUES (:cid, :pid, :u, :pw, :start, :end, 'trial')
             RETURNING *
         """),
         {"cid": body.customer_id, "pid": body.plan_id, "u": username,
-         "pw": password, "start": now, "end": expires},
+        "pw": password, "start": now, "end": expires},
     )
 
     db.execute(
         text("INSERT INTO radcheck (UserName, Attribute, op, Value) VALUES "
-             "(:u, 'Cleartext-Password', ':=', :pw), "
-             "(:u, 'Expiration', ':=', :exp), "
-             "(:u, 'Simultaneous-Use', ':=', '1')"),
+            "(:u, 'Cleartext-Password', ':=', :pw), "
+            "(:u, 'Expiration', ':=', :exp), "
+            "(:u, 'Simultaneous-Use', ':=', '1')"),
         {"u": username, "pw": password, "exp": expires.strftime("%d %b %Y %H:%M:%S")},
     )
     db.execute(

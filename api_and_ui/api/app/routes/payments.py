@@ -76,7 +76,7 @@ async def simulate_payment(
     pay_result = db.execute(
         text("""
             INSERT INTO payments (subscription_id, amount_cents, amount_display,
-                   currency, payment_method, notes)
+                  currency, payment_method, notes)
             VALUES (:sid, :amt, :amt_disp, 'KSH', 'payment',
                     'Plan: ' || COALESCE((SELECT name FROM plans WHERE id = :pid), ''))
             RETURNING *
