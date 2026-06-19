@@ -19,8 +19,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('access_token'));
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = useCallback(async () => {
-    if (!token) {
+  const refreshUser = useCallback(async (tokenOverride?: string) => {
+    const activeToken = tokenOverride ?? token;
+    if (!activeToken) {
       setLoading(false);
       return;
     }
@@ -44,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const resp = await authApi.login(data);
     localStorage.setItem('access_token', resp.access_token);
     setToken(resp.access_token);
-    await refreshUser();
+    await refreshUser(resp.access_token);
     return resp;
   };
 
