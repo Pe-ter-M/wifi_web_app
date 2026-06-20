@@ -34,29 +34,30 @@ export default function AdminPackages() {
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
+  // ⚠️ Changed: price field (not price_cents/price_display), added simultaneous_use
   const [form, setForm] = useState({
-    name: '', description: '', price_cents: 0, price_display: 0,
+    name: '', description: '', price: 0,
     bandwidth_up: 8192, bandwidth_down: 8192, session_timeout: 86400,
-    idle_timeout: 600, is_active: true, sort_order: 0,
+    idle_timeout: 600, simultaneous_use: 1, is_active: true, sort_order: 0,
   });
 
   const load = async () => { const p = await packagesApi.list(); setPlans(p); };
   useEffect(() => { if (isAdmin) load(); else navigate('/dashboard'); }, [isAdmin, navigate]);
 
   const resetForm = () => setForm({
-    name: '', description: '', price_cents: 0, price_display: 0,
+    name: '', description: '', price: 0,
     bandwidth_up: 8192, bandwidth_down: 8192, session_timeout: 86400,
-    idle_timeout: 600, is_active: true, sort_order: 0,
+    idle_timeout: 600, simultaneous_use: 1, is_active: true, sort_order: 0,
   });
 
   const openCreate = () => { setEditId(null); resetForm(); setShowModal(true); };
   const openEdit = (p: Plan) => {
     setEditId(p.id);
     setForm({
-      name: p.name, description: p.description || '', price_cents: p.price_cents,
-      price_display: p.price_display, bandwidth_up: p.bandwidth_up, bandwidth_down: p.bandwidth_down,
+      name: p.name, description: p.description || '', price: p.price,
+      bandwidth_up: p.bandwidth_up, bandwidth_down: p.bandwidth_down,
       session_timeout: p.session_timeout, idle_timeout: p.idle_timeout,
-      is_active: p.is_active, sort_order: p.sort_order,
+      simultaneous_use: p.simultaneous_use || 1, is_active: p.is_active, sort_order: p.sort_order,
     });
     setShowModal(true);
   };
@@ -121,11 +122,11 @@ export default function AdminPackages() {
               </span>
             </div>
             <p className="text-2xl font-extrabold text-indigo-600 mt-1">
-              KSh {p.price_display ?? p.price_cents / 100}<span className="text-xs font-normal text-gray-400">/mo</span>
+              KSh {p.price}<span className="text-xs font-normal text-gray-400">/mo</span>
             </p>
             {p.description && <p className="text-sm text-gray-500 mt-1">{p.description}</p>}
             <div className="text-xs text-gray-600 mt-2">
-              {Math.round(p.bandwidth_down / 1024)} Mbps | Timeout: {p.session_timeout}s
+              {Math.round(p.bandwidth_down / 1024)} Mbps | {p.simultaneous_use} device{p.simultaneous_use > 1 ? 's' : ''} | Timeout: {p.session_timeout}s
             </div>
             <div className="flex gap-2 mt-3">
               <button onClick={() => openEdit(p)} className="text-xs bg-gray-100 px-2 py-1 rounded hover:bg-gray-200 transition">✏ Edit</button>
@@ -145,13 +146,14 @@ export default function AdminPackages() {
             <h3 className="text-xl font-bold mb-4">{editId ? 'Edit Package' : 'Add Package'}</h3>
             <p className="text-xs text-gray-400 mb-3">Hover the <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold mx-1">?</span> icons for field explanations.</p>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div><label className="text-xs text-gray-500">Name<TooltipIcon text="Package name shown to customers, e.g. 15Mbps" /></label><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="text-xs text-gray-500">Description<TooltipIcon text="Short description shown on customer payment page" /></label><input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="text-xs text-gray-500">Price (KSh)<TooltipIcon text="Price customers see and pay. e.g. KSh 2300" /></label><input type="number" value={form.price_display} onChange={e => setForm(f => ({ ...f, price_display: Number(e.target.value), price_cents: Number(e.target.value) * 100 }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="text-xs text-gray-500">Bandwidth Down<TooltipIcon text="Download speed in Kbps. 10240 = 10 Mbps" /></label><input type="number" value={form.bandwidth_down} onChange={e => setForm(f => ({ ...f, bandwidth_down: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="text-xs text-gray-500">Bandwidth Up<TooltipIcon text="Upload speed in Kbps. Usually same as download" /></label><input type="number" value={form.bandwidth_up} onChange={e => setForm(f => ({ ...f, bandwidth_up: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="text-xs text-gray-500">Session Timeout (s)<TooltipIcon text="Max connection time. 86400s = 24 hours" /></label><input type="number" value={form.session_timeout} onChange={e => setForm(f => ({ ...f, session_timeout: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="text-xs text-gray-500">Idle Timeout (s)<TooltipIcon text="Kick idle users after this many seconds. Frees bandwidth" /></label><input type="number" value={form.idle_timeout} onChange={e => setForm(f => ({ ...f, idle_timeout: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Name<TooltipIcon text="Package name shown to customers" /></label><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Description</label><input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Price (KSh)<TooltipIcon text="Monthly price e.g. 1500" /></label><input type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Max Devices<TooltipIcon text="Simultaneous connections allowed" /></label><input type="number" value={form.simultaneous_use} onChange={e => setForm(f => ({ ...f, simultaneous_use: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Download (Kbps)<TooltipIcon text="10240 = 10 Mbps" /></label><input type="number" value={form.bandwidth_down} onChange={e => setForm(f => ({ ...f, bandwidth_down: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Upload (Kbps)</label><input type="number" value={form.bandwidth_up} onChange={e => setForm(f => ({ ...f, bandwidth_up: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Session Timeout (s)<TooltipIcon text="86400s = 24 hours" /></label><input type="number" value={form.session_timeout} onChange={e => setForm(f => ({ ...f, session_timeout: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="text-xs text-gray-500">Idle Timeout (s)</label><input type="number" value={form.idle_timeout} onChange={e => setForm(f => ({ ...f, idle_timeout: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
               <label className="flex items-center gap-2 text-sm mt-2 col-span-2">
                 <input type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
                 Active (visible to customers)

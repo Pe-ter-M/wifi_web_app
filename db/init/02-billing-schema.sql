@@ -213,36 +213,34 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================
--- 3. sync_plan_to_radius
--- Copies plan settings to RADIUS group tables (radgroupcheck + radgroupreply)
+-- 3. sync_plan_to_radius (TRIGGER VERSION)
+-- Copies plan settings to RADIUS group tables
 -- Called automatically by TRIGGER on plans INSERT/UPDATE
--- Also callable manually if sync issues occur
 -- ============================================================
-CREATE OR REPLACE FUNCTION sync_plan_to_radius(p_plan_id integer)
-RETURNS void AS $$
+CREATE OR REPLACE FUNCTION sync_plan_to_radius()
+RETURNS trigger AS $$
 DECLARE
-    v_plan plans%ROWTYPE;
+    v_group_name text;
 BEGIN
-    SELECT * INTO v_plan FROM plans WHERE id = p_plan_id;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Plan ID % not found', p_plan_id;
-    END IF;
+    v_group_name := NEW.group_name;
     
     -- Remove old group settings for clean sync
-    DELETE FROM radgroupcheck WHERE GroupName = v_plan.group_name;
-    DELETE FROM radgroupreply WHERE GroupName = v_plan.group_name;
+    DELETE FROM radgroupcheck WHERE GroupName = v_group_name;
+    DELETE FROM radgroupreply WHERE GroupName = v_group_name;
     
     -- Insert group check (restrictions enforced before access)
     INSERT INTO radgroupcheck (GroupName, Attribute, op, Value)
-    VALUES (v_plan.group_name, 'Simultaneous-Use', ':=', v_plan.simultaneous_use::text);
+    VALUES (v_group_name, 'Simultaneous-Use', ':=', NEW.simultaneous_use::text);
     
     -- Insert group replies (policies applied after authentication)
     INSERT INTO radgroupreply (GroupName, Attribute, op, Value) VALUES
-        (v_plan.group_name, 'Mikrotik-Rate-Limit', ':=', 
-         v_plan.bandwidth_down::text || 'k/' || v_plan.bandwidth_up::text || 'k'),
-        (v_plan.group_name, 'Session-Timeout', ':=', v_plan.session_timeout::text),
-        (v_plan.group_name, 'Idle-Timeout', ':=', v_plan.idle_timeout::text),
-        (v_plan.group_name, 'Acct-Interim-Interval', ':=', '300');
+        (v_group_name, 'Mikrotik-Rate-Limit', ':=', 
+         NEW.bandwidth_down::text || 'k/' || NEW.bandwidth_up::text || 'k'),
+        (v_group_name, 'Session-Timeout', ':=', NEW.session_timeout::text),
+        (v_group_name, 'Idle-Timeout', ':=', NEW.idle_timeout::text),
+        (v_group_name, 'Acct-Interim-Interval', ':=', '300');
+    
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -271,10 +269,8 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================
--- 5. sync_subscription_to_radius
--- Updates radcheck and radusergroup for a subscription
--- Uses customer's PPPoE credentials (permanent, never changed)
--- Called automatically by TRIGGER on subscriptions INSERT/UPDATE
+-- 5a. sync_subscription_to_radius (MANUAL VERSION - with parameter)
+-- Used by create_subscription_from_payment and manual calls
 -- ============================================================
 CREATE OR REPLACE FUNCTION sync_subscription_to_radius(p_subscription_id integer)
 RETURNS void AS $$
@@ -290,7 +286,6 @@ BEGIN
     
     SELECT * INTO v_plan FROM plans WHERE id = v_sub.plan_id;
     
-    -- Get customer's permanent PPPoE credentials
     SELECT * INTO v_pppoe FROM pppoe_credentials 
     WHERE customer_id = v_sub.customer_id AND is_active = TRUE;
     
@@ -298,42 +293,43 @@ BEGIN
         RAISE EXCEPTION 'No active PPPoE credentials for customer ID %', v_sub.customer_id;
     END IF;
     
-    -- Remove existing RADIUS entries for clean sync
     DELETE FROM radcheck WHERE UserName = v_pppoe.username;
     DELETE FROM radusergroup WHERE UserName = v_pppoe.username;
     
-    -- Insert RADIUS authentication entries
     INSERT INTO radcheck (UserName, Attribute, op, Value) VALUES
         (v_pppoe.username, 'Cleartext-Password', ':=', v_pppoe.password),
         (v_pppoe.username, 'Expiration', ':=', 
          to_char(v_sub.current_period_end, 'DD Mon YYYY HH24:MI:SS'));
     
-    -- Link user to plan's RADIUS group
     INSERT INTO radusergroup (UserName, GroupName, priority)
     VALUES (v_pppoe.username, v_plan.group_name, 0);
 END;
 $$ LANGUAGE plpgsql;
 
+-- ============================================================
+-- 5b. trg_sync_subscription_to_radius (TRIGGER VERSION - no params)
+-- Called automatically by TRIGGER on subscriptions INSERT/UPDATE
+-- ============================================================
+CREATE OR REPLACE FUNCTION trg_sync_subscription_to_radius()
+RETURNS trigger AS $$
+BEGIN
+    PERFORM sync_subscription_to_radius(NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 
 -- ============================================================
--- 6. cleanup_subscription_radius
--- Removes user's RADIUS entries (radcheck + radusergroup)
--- Called when subscription is deleted or deactivated
--- Does NOT touch radgroupcheck/radgroupreply (shared group data)
+-- 6. cleanup_subscription_radius (TRIGGER VERSION)
+-- Removes user's RADIUS entries when subscription is deleted
 -- ============================================================
-CREATE OR REPLACE FUNCTION cleanup_subscription_radius(p_subscription_id integer)
-RETURNS void AS $$
+CREATE OR REPLACE FUNCTION cleanup_subscription_radius()
+RETURNS trigger AS $$
 DECLARE
-    v_customer_id integer;
     v_pppoe pppoe_credentials%ROWTYPE;
 BEGIN
-    SELECT customer_id INTO v_customer_id FROM subscriptions WHERE id = p_subscription_id;
-    IF NOT FOUND THEN
-        RETURN; -- Subscription already deleted, nothing to clean
-    END IF;
-    
     -- Get PPPoE username to remove from RADIUS
-    SELECT * INTO v_pppoe FROM pppoe_credentials WHERE customer_id = v_customer_id;
+    SELECT * INTO v_pppoe FROM pppoe_credentials WHERE customer_id = OLD.customer_id;
     
     IF FOUND THEN
         -- Remove user-specific RADIUS entries only
@@ -341,6 +337,8 @@ BEGIN
         DELETE FROM radusergroup WHERE UserName = v_pppoe.username;
         DELETE FROM radreply WHERE UserName = v_pppoe.username;
     END IF;
+    
+    RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -625,7 +623,7 @@ FOR EACH ROW EXECUTE FUNCTION sync_plan_to_radius();
 DROP TRIGGER IF EXISTS trg_sub_sync ON subscriptions;
 CREATE TRIGGER trg_sub_sync
 AFTER INSERT OR UPDATE ON subscriptions
-FOR EACH ROW EXECUTE FUNCTION sync_subscription_to_radius();
+FOR EACH ROW EXECUTE FUNCTION trg_sync_subscription_to_radius();
 
 -- Auto-cleanup RADIUS when subscription is deleted
 DROP TRIGGER IF EXISTS trg_sub_cleanup ON subscriptions;

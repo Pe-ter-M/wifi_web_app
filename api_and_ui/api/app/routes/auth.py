@@ -12,15 +12,15 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    """Login using RADIUS credentials (username = radcheck username, password = Cleartext-Password)
-    OR using customer table (for admins and portal-only users)."""
+    """Login using web portal credentials (customers.password_hash) 
+    OR PPPoE credentials (pppoe_credentials.password)."""
+    
+    # Try customer table first (web portal login)
     result = db.execute(
         text("""
-            SELECT c.id, c.name, c.email, c.is_admin, c.password_hash,
-                   s.username as sub_username, s.password as sub_password, s.id as sub_id
+            SELECT c.id, c.name, c.email, c.is_admin, c.password_hash
             FROM customers c
-            LEFT JOIN subscriptions s ON s.customer_id = c.id
-            WHERE c.email = :username OR s.username = :username
+            WHERE c.email = :username
             LIMIT 1
         """),
         {"username": body.username},
@@ -32,29 +32,23 @@ async def login(body: LoginRequest, response: Response, db: Session = Depends(ge
     customer_id = None
     customer_name = "Unknown"
 
-    if row:
-        customer_id = row.id
-        customer_name = row.name
-        is_admin = row.is_admin or False
-
-        # Try customer password_hash first
-        if row.password_hash and await verify_password(body.password, row.password_hash):
+    if row and row.password_hash:
+        if await verify_password(body.password, row.password_hash):
             authenticated = True
-        # Then try RADIUS password (plaintext check)
-        elif row.sub_password and body.password == row.sub_password:
-            authenticated = True
+            customer_id = row.id
+            customer_name = row.name
+            is_admin = row.is_admin or False
 
-    # Also try direct radcheck lookup
+    # Try PPPoE credentials (RADIUS-style login)
     if not authenticated:
         result2 = db.execute(
             text("""
                 SELECT c.id, c.name, c.is_admin
-                FROM radcheck r
-                JOIN subscriptions s ON s.username = r.UserName
-                JOIN customers c ON c.id = s.customer_id
-                WHERE r.UserName = :username
-                  AND r.Attribute = 'Cleartext-Password'
-                  AND r.Value = :password
+                FROM pppoe_credentials p
+                JOIN customers c ON c.id = p.customer_id
+                WHERE p.username = :username
+                  AND p.password = :password
+                  AND p.is_active = true
                 LIMIT 1
             """),
             {"username": body.username, "password": body.password},

@@ -51,11 +51,9 @@ async def get_current_user(
     """Extract current user from JWT token. Also works for cookie-based auth."""
     token = None
 
-    # Try Authorization header first
     if credentials:
         token = credentials.credentials
 
-    # Fall back to cookie
     if not token:
         token = request.cookies.get("access_token")
         if token and token.startswith("Bearer "):

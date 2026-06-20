@@ -29,18 +29,21 @@ export interface UserInfo {
   is_admin: boolean;
 }
 
+// ⚠️ CHANGED: price_cents/price_display → price, added group_name, simultaneous_use
 export interface Plan {
   id: number;
   name: string;
+  group_name: string;
   description: string | null;
-  price_cents: number;
-  price_display: number;
+  price: number;                    // Was price_cents + price_display
   bandwidth_up: number;
   bandwidth_down: number;
   session_timeout: number;
   idle_timeout: number;
+  simultaneous_use: number;         // NEW
   is_active: boolean;
   sort_order: number;
+  created_at?: string;
 }
 
 export interface Customer {
@@ -53,57 +56,61 @@ export interface Customer {
   created_at: string;
 }
 
+// ⚠️ CHANGED: No username/password here anymore
 export interface Subscription {
   id: number;
   customer_id: number;
   plan_id: number;
-  username: string;
   status: string;
   current_period_start: string;
   current_period_end: string;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
   created_at: string;
 }
 
 export interface SubscriptionStatus {
+  id: number;
   username: string;
   status: string;
   plan_name: string;
+  price: number;                    // Was price_display
   expires_at: string;
   is_active: boolean;
   days_remaining: number;
+  device_count: number;
   max_devices: number;
-  current_device_count: number;
   last_seen: string | null;
 }
 
+// ⚠️ CHANGED: price_display → price, simplified
 export interface MyCredential {
   id: number;
   username: string;
   password: string;
   status: string;
   plan_name: string;
-  price_display: number;
+  price: number;                    // Was price_display
   expires_at: string | null;
   is_active: boolean;
-  is_trial: boolean;
   days_remaining: number;
-  hours_remaining: number;
-  mins_remaining: number;
-  secs_remaining: number;
-  total_seconds_remaining: number;
   device_count: number;
   max_devices: number;
   last_seen: string | null;
+  pppoe_active: boolean;            // NEW
 }
 
+// ⚠️ CHANGED: amount_cents/amount_display → amount
 export interface Payment {
   id: number;
   subscription_id: number;
-  amount_cents: number;
-  amount_display: number | null;
+  amount: number;                   // Was amount_cents + amount_display
   currency: string;
   payment_method: string;
+  external_ref: string | null;
+  received_by: string | null;
   paid_at: string;
+  notes: string | null;
   new_expiry: string | null;
   username: string | null;
 }
@@ -126,11 +133,12 @@ export interface AuthLogEntry {
   authdate: string;
 }
 
+// ⚠️ CHANGED: revenue_today_cents/revenue_this_month_cents → revenue_today/revenue_this_month
 export interface DashboardStats {
   total_customers: number;
   active_subscriptions: number;
   expired_subscriptions: number;
   live_sessions: number;
-  revenue_today_cents: number;
-  revenue_this_month_cents: number;
+  revenue_today: number;            // Was revenue_today_cents
+  revenue_this_month: number;       // Was revenue_this_month_cents
 }

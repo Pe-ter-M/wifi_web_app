@@ -45,7 +45,7 @@ class CustomerCreate(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     address: Optional[str] = None
-    password: Optional[str] = None            # web portal password
+    password: Optional[str] = None
     is_admin: bool = False
 
 
@@ -61,29 +61,54 @@ class CustomerResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CustomerDetailResponse(BaseModel):
+    """Full customer detail with subscriptions."""
+    customer: CustomerResponse
+    subscriptions: list["SubscriptionDetailResponse"]
+
+
+class SubscriptionDetailResponse(BaseModel):
+    id: int
+    username: str
+    status: str
+    plan_name: str
+    price: float
+    bandwidth: str
+    current_period_start: Optional[datetime] = None
+    current_period_end: Optional[datetime] = None
+    is_active: bool
+    days_remaining: int
+    device_count: int
+    last_seen: Optional[datetime] = None
+
+
 # ── Plans / Packages ────────────────────────────────────────────────
+# ⚠️ BREAKING: price_cents/price_display removed, replaced with price (float)
+# ⚠️ BREAKING: Added group_name, simultaneous_use fields
 class PlanCreate(BaseModel):
     name: str
+    group_name: Optional[str] = None            # Auto-generated if blank
     description: Optional[str] = None
-    price_cents: int
-    price_display: float
+    price: float                                # e.g., 1500.00
     bandwidth_up: int = 8192
     bandwidth_down: int = 8192
     session_timeout: int = 86400
     idle_timeout: int = 600
+    simultaneous_use: int = 1
     is_active: bool = True
     sort_order: int = 0
 
 
 class PlanUpdate(BaseModel):
     name: Optional[str] = None
+    group_name: Optional[str] = None
     description: Optional[str] = None
-    price_cents: Optional[int] = None
-    price_display: Optional[float] = None
+    price: Optional[float] = None               # ⚠️ Changed from price_cents
     bandwidth_up: Optional[int] = None
     bandwidth_down: Optional[int] = None
     session_timeout: Optional[int] = None
     idle_timeout: Optional[int] = None
+    simultaneous_use: Optional[int] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -91,68 +116,107 @@ class PlanUpdate(BaseModel):
 class PlanResponse(BaseModel):
     id: int
     name: str
+    group_name: str
     description: Optional[str] = None
-    price_cents: int
-    price_display: float
+    price: float                                # ⚠️ Changed from price_cents
     bandwidth_up: int
     bandwidth_down: int
     session_timeout: int
     idle_timeout: int
+    simultaneous_use: int
     is_active: bool
     sort_order: int
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
+# ── PPPoE Credentials ──────────────────────────────────────────────
+class PPPoECredentialResponse(BaseModel):
+    id: int
+    customer_id: int
+    username: str
+    password: str                              # Only shown once at creation
+    is_active: bool
+    created_at: datetime
+
+
+class PPPoEGenerateResponse(BaseModel):
+    credential_id: int
+    username: str
+    password: str                              # Show once - save it!
+
+
 # ── Subscriptions ──────────────────────────────────────────────────
+# ⚠️ BREAKING: No username/password in subscription - those are in pppoe_credentials
 class SubscriptionCreate(BaseModel):
     customer_id: int
     plan_id: int
-    username: Optional[str] = None             # auto-generated if blank
-    password: Optional[str] = None             # auto-generated if blank
 
 
 class SubscriptionResponse(BaseModel):
     id: int
     customer_id: int
     plan_id: int
-    username: str
     status: str
     current_period_start: datetime
     current_period_end: datetime
+    cancelled_at: Optional[datetime] = None
+    cancel_reason: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
 class SubscriptionStatusResponse(BaseModel):
-    username: str
-    status: str                                # "active" | "expired" | "cancelled"
+    id: int
+    username: str                              # From pppoe_credentials
+    status: str
     plan_name: str
+    price: float
     expires_at: datetime
-    is_active: bool                            # computed: now < expires_at AND status=active
-    days_remaining: int                        # computed
-    max_devices: int = 1
-    current_device_count: int = 0
-    last_seen: Optional[datetime] = None       # last auth attempt
+    is_active: bool
+    days_remaining: int
+    device_count: int
+    max_devices: int
+    last_seen: Optional[datetime] = None
+
+
+class MyCredentialsResponse(BaseModel):
+    """Customer's own credentials and subscription info."""
+    id: int
+    username: str
+    password: str                              # Cleartext PPPoE password
+    status: str
+    plan_name: str
+    price: float
+    expires_at: Optional[datetime] = None
+    is_active: bool
+    days_remaining: int
+    device_count: int
+    max_devices: int
+    last_seen: Optional[datetime] = None
 
 
 # ── Payments ───────────────────────────────────────────────────────
+# ⚠️ BREAKING: amount_cents/amount_display → amount
 class PaymentSimulate(BaseModel):
     subscription_id: int
-    plan_id: Optional[int] = None              # if changing plan
-    amount_cents: Optional[int] = None         # auto from plan if blank
+    plan_id: Optional[int] = None
+    amount: Optional[float] = None             # ⚠️ Changed from amount_cents
     payment_method: str = "simulated"
 
 
 class PaymentResponse(BaseModel):
     id: int
     subscription_id: int
-    amount_cents: int
-    amount_display: Optional[float] = None
+    amount: float                               # ⚠️ Changed
     currency: str
     payment_method: str
+    external_ref: Optional[str] = None
+    received_by: Optional[str] = None
     paid_at: datetime
+    notes: Optional[str] = None
     new_expiry: Optional[datetime] = None
     username: Optional[str] = None
 
@@ -184,8 +248,8 @@ class DashboardStats(BaseModel):
     active_subscriptions: int
     expired_subscriptions: int
     live_sessions: int
-    revenue_today_cents: int
-    revenue_this_month_cents: int
+    revenue_today: float                        # ⚠️ Changed from revenue_today_cents
+    revenue_this_month: float                   # ⚠️ Changed from revenue_this_month_cents
 
 
 # ── Generic ────────────────────────────────────────────────────────

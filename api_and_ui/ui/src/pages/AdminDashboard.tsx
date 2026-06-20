@@ -15,7 +15,7 @@ export default function AdminDashboard() {
     dashboardApi.stats().then(setStats).catch(console.error);
   }, [isAdmin, navigate]);
 
-  const formatKSH = (cents: number) => `KSh ${(cents / 100).toLocaleString()}`;
+  const formatKSH = (amount: number) => `KSh ${(amount || 0).toLocaleString()}`;
   const fmt = (n: number | undefined) => n?.toLocaleString() ?? '-';
 
   return (
@@ -27,8 +27,8 @@ export default function AdminDashboard() {
           ['✅', 'Active Subs', fmt(stats?.active_subscriptions)],
           ['⚠️', 'Expired Subs', fmt(stats?.expired_subscriptions)],
           ['🔗', 'Live Sessions', fmt(stats?.live_sessions)],
-          ['💰', 'Revenue Today', stats ? formatKSH(stats.revenue_today_cents) : '-'],
-          ['💵', 'Revenue This Month', stats ? formatKSH(stats.revenue_this_month_cents) : '-'],
+          ['💰', 'Revenue Today', stats ? formatKSH(stats.revenue_today) : '-'],
+          ['💵', 'Revenue This Month', stats ? formatKSH(stats.revenue_this_month) : '-'],
         ].map(([icon, label, value]) => (
           <div key={label} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <span className="text-2xl">{icon}</span>

@@ -58,7 +58,6 @@ export default function CustomerDashboard() {
     load();
   }, [user, isAdmin, navigate, refreshKey]);
 
-  // Auto-refresh countdown every 30s
   useEffect(() => {
     const id = setInterval(() => setRefreshKey(k => k + 1), 30000);
     return () => clearInterval(id);
@@ -118,9 +117,6 @@ export default function CustomerDashboard() {
         {creds.length === 0 && (
           <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-6 text-center">
             <p className="text-yellow-800">No subscriptions found. Contact support.</p>
-            <Link to="/payment" className="mt-3 inline-block bg-indigo-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-indigo-700">
-              Get Started
-            </Link>
           </div>
         )}
 
@@ -129,15 +125,11 @@ export default function CustomerDashboard() {
             <div className="flex items-start justify-between flex-wrap gap-2">
               <div>
                 <h3 className="text-lg font-semibold">
-                  {c.is_trial ? '🔬 Free Trial Active' : c.is_active ? '✅ Internet Active' : '❌ Internet Cut Off'}
+                  {c.is_active ? '✅ Internet Active' : '❌ Internet Cut Off'}
                 </h3>
                 <p className="text-sm text-gray-600">
-                  {c.is_trial
-                    ? `Free trial — expires in `
-                    : c.is_active
-                      ? `Connection active — `
-                      : 'Subscription expired. Make a payment to reconnect.'}
-                  {c.is_active && <Countdown expiresAt={c.expires_at!} />}
+                  {c.is_active ? 'Connection active — ' : 'Subscription expired. Make a payment to reconnect.'}
+                  {c.is_active && c.expires_at && <Countdown expiresAt={c.expires_at} />}
                 </p>
               </div>
               <StatusIndicator isActive={c.is_active} label={c.is_active ? 'Online' : 'Offline'} />
@@ -161,15 +153,15 @@ export default function CustomerDashboard() {
                 </div>
                 <div>
                   <span className="text-gray-500 text-xs">Plan</span>
-                  <p className="font-semibold">{c.plan_name} &mdash; {company?.currency_symbol} {c.price_display ?? 0}/mo</p>
+                  <p className="font-semibold">{c.plan_name} — {company?.currency_symbol} {c.price ?? 0}/mo</p>
                 </div>
                 <div>
                   <span className="text-gray-500 text-xs">Status</span>
-                  <p className="font-semibold capitalize">{c.status} {c.is_trial && '(trial)'}</p>
+                  <p className="font-semibold capitalize">{c.status}</p>
                 </div>
                 <div>
                   <span className="text-gray-500 text-xs">Time Remaining</span>
-                  <p className="font-semibold text-base"><Countdown expiresAt={c.expires_at!} /></p>
+                  <p className="font-semibold text-base">{c.expires_at && <Countdown expiresAt={c.expires_at} />}</p>
                 </div>
                 <div>
                   <span className="text-gray-500 text-xs">Devices Connected</span>
@@ -187,25 +179,11 @@ export default function CustomerDashboard() {
             <div className="mt-4 flex gap-3">
               <Link to="/payment"
                 className="flex-1 bg-indigo-600 text-white text-center py-3 rounded-xl font-semibold hover:bg-indigo-700 transition">
-                {c.is_trial ? 'Pay to Activate (Ends Trial)' : c.is_active ? 'Renew / Upgrade Plan' : 'Pay to Reconnect'}
+                {c.is_active ? 'Renew / Upgrade Plan' : 'Pay to Reconnect'}
               </Link>
             </div>
           </div>
         ))}
-
-        {creds.length > 0 && (
-          <details className="bg-white border border-gray-200 rounded-xl p-4">
-            <summary className="font-semibold cursor-pointer text-sm text-gray-600">Payment History</summary>
-            <div className="mt-3 text-sm space-y-2 max-h-48 overflow-auto">
-              {creds.map(c => (
-                <div key={c.id} className="flex justify-between border-b pb-1 text-gray-600">
-                  <span>{c.plan_name}</span>
-                  <span>{c.expires_at ? new Date(c.expires_at).toLocaleDateString() : '-'}</span>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
       </div>
     </Layout>
   );
