@@ -54,6 +54,8 @@ export interface Customer {
   address: string | null;
   is_admin: boolean;
   created_at: string;
+  has_pppoe: boolean;         
+  pppoe_username: string | null; 
 }
 
 // ⚠️ CHANGED: No username/password here anymore

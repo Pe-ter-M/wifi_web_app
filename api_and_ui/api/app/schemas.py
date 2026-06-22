@@ -57,6 +57,8 @@ class CustomerResponse(BaseModel):
     address: Optional[str] = None
     is_admin: bool
     created_at: datetime
+    has_pppoe: bool = False          
+    pppoe_username: Optional[str] = None  
 
     model_config = {"from_attributes": True}
 

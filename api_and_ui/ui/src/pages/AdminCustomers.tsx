@@ -149,52 +149,68 @@ export default function AdminCustomers() {
       )}
 
       {/* Customer list */}
-      <div className="space-y-3">
-        {customers.map(c => (
-          <div key={c.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow transition cursor-pointer"
-               onClick={() => handleViewDetail(c.id)}>
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-indigo-700 hover:underline">{c.name}</h3>
-                <p className="text-sm text-gray-500 truncate">{c.email} {c.phone && `| ${c.phone}`}</p>
-              </div>
-              <div className="flex items-center gap-2 ml-3 shrink-0">
-                <button onClick={e => { e.stopPropagation(); handleViewDetail(c.id); }}
-                  className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium transition">
-                  Details
-                </button>
-                <button onClick={e => { e.stopPropagation(); setConfirmDel(c.id); }}
-                  className="text-xs text-red-500 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 transition">
-                  Delete
-                </button>
-              </div>
-            </div>
-            {c.subscriptions && c.subscriptions.length > 0 ? (
-              <div className="mt-2 space-y-1">
-                {c.subscriptions.map(s => (
-                  <div key={s.id} className="flex items-center gap-2 text-xs">
-                    <span className={`px-2 py-0.5 rounded-full font-medium ${
-                      s.status === 'active' ? 'bg-green-100 text-green-700' :
-                      s.status === 'trial' ? 'bg-amber-100 text-amber-700' :
-                      'bg-red-100 text-red-700'
-                    }`}>
-                      {s.status === 'trial' ? 'TRIAL' : s.status.toUpperCase()}
-                    </span>
-                    <span className="text-gray-400">
-                      {s.status === 'trial'
-                        ? `trial ends ${new Date(s.current_period_end).toLocaleString()}`
-                        : `exp: ${new Date(s.current_period_end).toLocaleDateString()}`
-                      }
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 mt-2">No subscriptions — generate PPPoE first</p>
-            )}
-          </div>
-        ))}
+  <div className="space-y-3">
+  {customers.map(c => (
+    <div key={c.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow transition cursor-pointer"
+         onClick={() => handleViewDetail(c.id)}>
+      <div className="flex items-start justify-between">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-indigo-700 hover:underline">{c.name}</h3>
+          <p className="text-sm text-gray-500 truncate">{c.email} {c.phone && `| ${c.phone}`}</p>
+        </div>
+        <div className="flex items-center gap-2 ml-3 shrink-0">
+          <button onClick={e => { e.stopPropagation(); handleViewDetail(c.id); }}
+            className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium transition">
+            Details
+          </button>
+          <button onClick={e => { e.stopPropagation(); setConfirmDel(c.id); }}
+            className="text-xs text-red-500 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 transition">
+            Delete
+          </button>
+        </div>
       </div>
+      
+      {/* Status badges */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {/* Subscription status */}
+        {c.subscriptions && c.subscriptions.length > 0 ? (
+          c.subscriptions.map(s => (
+            <div key={s.id} className="flex items-center gap-2 text-xs">
+              <span className={`px-2 py-0.5 rounded-full font-medium ${
+                s.status === 'active' ? 'bg-green-100 text-green-700' :
+                s.status === 'trial' ? 'bg-amber-100 text-amber-700' :
+                'bg-red-100 text-red-700'
+              }`}>
+                {s.status === 'trial' ? 'TRIAL' : s.status.toUpperCase()}
+              </span>
+              <span className="text-gray-400">
+                {s.status === 'trial'
+                  ? `ends ${new Date(s.current_period_end).toLocaleDateString()}`
+                  : `exp: ${new Date(s.current_period_end).toLocaleDateString()}`
+                }
+              </span>
+            </div>
+          ))
+        ) : (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+            No subscription
+          </span>
+        )}
+        
+        {/* PPPoE status */}
+        {c.has_pppoe ? (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200 font-mono">
+            🔑 {c.pppoe_username}
+          </span>
+        ) : (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 border border-red-200">
+            No PPPoE
+          </span>
+        )}
+      </div>
+    </div>
+  ))}
+</div>
 
       {/* Detail slide-over */}
       {detailCust && (
@@ -224,10 +240,11 @@ export default function AdminCustomers() {
               <div className={`rounded-xl p-4 mb-4 ${detailCust.pppoe?.has_credentials ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
                 <h4 className="font-semibold text-sm mb-2">🔑 PPPoE Credentials</h4>
                 {detailCust.pppoe?.has_credentials ? (
-                  <div>
+                <div>
                     <p className="text-sm">Username: <span className="font-mono font-bold">{detailCust.pppoe.username}</span></p>
+                    <p className="text-sm mt-1">Password: <span className="font-mono font-bold">{detailCust.pppoe.password}</span></p>
                     <p className="text-xs text-green-600 mt-1">✅ Active — credentials are permanent</p>
-                  </div>
+                 </div>
                 ) : (
                   <div>
                     <p className="text-sm text-amber-700 mb-2">No PPPoE credentials yet</p>
@@ -239,16 +256,23 @@ export default function AdminCustomers() {
                 )}
               </div>
 
-              <div className="flex gap-2 mb-4">
+             <div className="flex gap-2 mb-4">
+              {!detailCust.pppoe?.has_credentials ? (
                 <button onClick={() => setConfirmGen(detailCust.customer.id)}
                   className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition">
-                  {detailCust.pppoe?.has_credentials ? 'Regenerate PPPoE' : '+ Generate PPPoE'}
+                  + Generate PPPoE
                 </button>
-                <button onClick={() => setConfirmDel(detailCust.customer.id)}
-                  className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 transition">
-                  Delete Customer
+              ) : (
+                <button disabled
+                  className="bg-gray-300 text-gray-500 px-4 py-2 rounded-lg text-sm font-semibold cursor-not-allowed">
+                  ✅ PPPoE Active
                 </button>
-              </div>
+              )}
+              <button onClick={() => setConfirmDel(detailCust.customer.id)}
+                className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 transition">
+                Delete Customer
+              </button>
+            </div>
 
               <h4 className="font-semibold text-sm text-gray-600 mb-2">Subscriptions ({detailCust.subscriptions.length})</h4>
               {detailCust.subscriptions.length === 0 && (

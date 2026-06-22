@@ -16,7 +16,14 @@ async def list_customers(
     admin: dict = Depends(require_admin),
     search: str = Query(None),
 ):
-    query = "SELECT * FROM customers WHERE is_admin = false"
+    query = """
+        SELECT c.*, 
+               CASE WHEN p.id IS NOT NULL THEN true ELSE false END as has_pppoe,
+               p.username as pppoe_username
+        FROM customers c
+        LEFT JOIN pppoe_credentials p ON p.customer_id = c.id
+        WHERE c.is_admin = false
+    """
     if search:
         query += " AND (name ILIKE :search OR email ILIKE :search OR phone ILIKE :search)"
     query += " ORDER BY id"
@@ -54,9 +61,9 @@ async def get_customer_detail(
 
     # Get PPPoE credentials
     pppoe = db.execute(
-        text("SELECT username, is_active FROM pppoe_credentials WHERE customer_id = :cid"),
-        {"cid": customer_id}
-    ).one_or_none()
+    text("SELECT username, password, is_active FROM pppoe_credentials WHERE customer_id = :cid"),
+    {"cid": customer_id}
+).one_or_none()
 
     # Get subscriptions
     subs = db.execute(text("""
@@ -113,6 +120,7 @@ async def get_customer_detail(
         },
         "pppoe": {
             "username": pppoe.username if pppoe else None,
+            "password": pppoe.password if pppoe else None,  
             "is_active": pppoe.is_active if pppoe else False,
             "has_credentials": pppoe is not None,
         },
