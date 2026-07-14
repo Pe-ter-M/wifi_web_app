@@ -4,10 +4,12 @@ A complete WiFi ISP billing and authentication platform combining FreeRADIUS (AA
 
 ## What This Does
 
-- **Authentication**: FreeRADIUS validates WiFi users against a PostgreSQL database
-- **Billing**: FastAPI backend manages subscriptions, customers, payments, and internet packages
-- **Portal**: React frontend provides admin dashboard and customer portal
+- **Authentication**: FreeRADIUS validates WiFi users against PostgreSQL via group-based policies
+- **Billing**: FastAPI backend manages customers, PPPoE credentials, subscriptions, payments, and plans
+- **Portal**: React frontend provides admin dashboard and customer self-service portal
 - **Accounting**: Real-time session tracking via RADIUS accounting tables
+- **PPPoE**: Customers get permanent PPPoE credentials that never change, even when switching plans
+- **RADIUS Group Sync**: Plan changes auto-sync to FreeRADIUS group tables (radgroupcheck/radgroupreply)
 
 ## System Architecture
 
@@ -21,12 +23,16 @@ A complete WiFi ISP billing and authentication platform combining FreeRADIUS (AA
 │ FreeRADIUS Container (phantom-radius)                        │
 │ - rlm_sql_postgresql: queries PostgreSQL for credentials    │
 │ - rlm_expiration: rejects expired users                     │
+│ - RADIUS group policies (radgroupcheck/radgroupreply)       │
 └──────────────────────┬──────────────────────────────────────┘
                        │
 ┌──────────────────────┴──────────────────────────────────────┐
 │ PostgreSQL Container (phantom-pg)                           │
 │ - radcheck, radacct, radreply, etc. (FreeRADIUS schema)     │
+│ - radgroupcheck, radgroupreply, radusergroup (group policy) │
+│ - pppoe_credentials (permanent customer credentials)        │
 │ - customers, subscriptions, payments, plans (billing)       │
+│ - password_history, audit_logs (security)                   │
 │ - settings (configuration)                                  │
 └──────────────────────────────────────────────────────────────┘
                        ▲
@@ -37,10 +43,11 @@ A complete WiFi ISP billing and authentication platform combining FreeRADIUS (AA
 │ - /api/auth - customer/admin login                          │
 │ - /api/customers - customer management                      │
 │ - /api/subscriptions - subscription CRUD                    │
-│ - /api/payments - payment logging                           │
-│ - /api/packages - internet plan management                  │
-│ - /api/sessions - live RADIUS session tracking              │
+│ - /api/payments - payment processing via SQL function       │
+│ - /api/packages - internet plan management + RADIUS sync   │
+│ - /api/sessions - live RADIUS sessions and auth log        │
 │ - /api/settings - company settings                          │
+│ - /api/mcp - MCP tool endpoint (AI assistant integration)  │
 └──────────────────────┬──────────────────────────────────────┘
                        │ HTTP (port 5173 dev / 80 prod)
                        │
@@ -76,20 +83,20 @@ A complete WiFi ISP billing and authentication platform combining FreeRADIUS (AA
 │   ├── Dockerfile                     # Python 3.12 + FastAPI image
 │   ├── requirements.txt               # Python dependencies
 │   └── app/
-│       ├── main.py                    # FastAPI app + startup logic
+│       ├── main.py                    # FastAPI app + startup seeding + MCP mount
 │       ├── database.py                # SQLAlchemy setup
-│       ├── models.py                  # ORM models (Customer, Subscription, etc.)
+│       ├── models.py                  # ORM models (Customer, Plan, Subscription, PPPoECredential, etc.)
 │       ├── schemas.py                 # Pydantic request/response schemas
-│       ├── auth.py                    # JWT and password utilities
-│       ├── default_packages.json      # Seed internet packages
+│       ├── auth.py                    # JWT + bcrypt utilities
+│       ├── config.py                  # App config (JWT_SECRET, DB URL, defaults)
 │       ├── default_settings.json      # Seed company settings
 │       └── routes/
-│           ├── auth.py                # POST /api/auth/login
-│           ├── customers.py           # /api/customers
-│           ├── subscriptions.py       # /api/subscriptions
-│           ├── payments.py            # /api/payments
-│           ├── packages.py            # /api/packages
-│           ├── sessions.py            # /api/sessions (live RADIUS sessions)
+│           ├── auth.py                # POST /api/auth/login, GET /me, POST /logout
+│           ├── customers.py           # /api/customers CRUD + PPPoE generation
+│           ├── subscriptions.py       # /api/subscriptions + /my-credentials
+│           ├── payments.py            # POST /payments/simulate, GET /payments
+│           ├── packages.py            # /api/packages (plans CRUD + RADIUS sync)
+│           ├── sessions.py            # /api/sessions/live, /auth-log
 │           └── settings.py            # /api/settings
 │
 ├── api_and_ui/ui/
@@ -193,9 +200,12 @@ docker compose logs -f postgres freeradius
 ```
 
 Wait for `postgres` to be marked as `healthy` (5-15 seconds). The database initializes with:
-- FreeRADIUS schema (radcheck, radacct, radreply, etc.)
-- Billing schema (customers, subscriptions, payments, plans)
-- Seed data: default settings, default internet packages, test accounts
+- FreeRADIUS schema (radcheck, radacct, radreply, radgroupcheck, radgroupreply, nas, etc.)
+- Billing schema (customers, plans, pppoe_credentials, subscriptions, payments, etc.)
+- SQL functions (generate_pppoe_credentials, sync_plan_to_radius, create_subscription_from_payment, etc.)
+- Seed data: default settings, default internet plans, admin user
+
+When the API starts, it also auto-seeds plans and the admin account if the tables are empty.
 
 ### Step 2: Run API on Host
 
@@ -233,7 +243,7 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 Verify the API:
 ```bash
 curl http://localhost:8000/
-# Should return: {"name":"Phantom Internet Providers","version":"2.0.0","status":"online"}
+# Should return: {"name":"Phantom Internet Providers","version":"3.0.0","status":"online"}
 
 curl http://localhost:8000/api/health
 # Should return: {"status":"healthy","database":"connected"}
@@ -273,14 +283,17 @@ Network:  http://192.168.x.x:5173
 - **Email**: `admin@phantomnet.co.ke`
 - **Password**: `admin123`
 
-### RADIUS Test Users (for authentication testing only, not in the UI)
-- **Username**: `test_active`
-  - **Password**: `testpass123`
-  - **Status**: Active (should authenticate)
-  
-- **Username**: `test_expired`
-  - **Password**: `expired123`
-  - **Status**: Expired (RADIUS should reject)
+### Default Plans (auto-seeded on first startup)
+| Plan | Price | Bandwidth | Simultaneous Use |
+|------|-------|-----------|-----------------|
+| 10Mbps | KSh 1,000 | 10 Mbps / 10 Mbps | 1 device |
+| 20Mbps | KSh 2,000 | 20 Mbps / 20 Mbps | 1 device |
+| 30Mbps | KSh 3,000 | 30 Mbps / 30 Mbps | 2 devices |
+| 50Mbps | KSh 5,000 | 50 Mbps / 50 Mbps | 2 devices |
+| 100Mbps | KSh 10,000 | 100 Mbps / 100 Mbps | 3 devices |
+
+RADIUS test users (`test_active`, `test_expired`) are no longer seeded. Use the API to create
+customers, generate PPPoE credentials, and create subscriptions to test RADIUS auth.
 
 ---
 
@@ -291,18 +304,24 @@ Network:  http://192.168.x.x:5173
 |-------|---------|
 | `radcheck` | User credentials (UserName, Attribute, Value) — e.g., Cleartext-Password, Expiration |
 | `radreply` | Response attributes sent back to access points |
-| `radusergroup` | Maps users to groups |
+| `radusergroup` | Maps users to RADIUS groups |
+| `radgroupcheck` | Group-level check attributes (restrictions like Simultaneous-Use) |
+| `radgroupreply` | Group-level reply attributes (policies like bandwidth, session timeout) |
 | `radacct` | Accounting records (sessions, bytes in/out, start/stop times) |
 | `radpostauth` | Authentication attempt logs (success/failure) |
+| `nas` | Network Access Servers (routers/APs registered for RADIUS) |
 
 ### Billing Tables (Custom)
 | Table | Purpose |
 |-------|---------|
-| `customers` | Users: name, email, password_hash, is_admin flag |
-| `plans` | Internet packages: name, price_cents, bandwidth limits, timeouts |
-| `subscriptions` | Active subscriptions: customer + plan + period_start + period_end |
-| `payments` | Payment ledger: subscription + amount + payment_method + timestamp |
-| `settings` | Key-value config: company name, currency, defaults |
+| `customers` | User accounts: name, email, password_hash, is_admin |
+| `plans` | Internet packages: name, group_name, price (float), bandwidth limits, simultaneous_use |
+| `pppoe_credentials` | Permanent PPPoE credentials — assigned once, never change |
+| `subscriptions` | Links customer + plan; carries status (trial/active/expired) and period |
+| `payments` | Payment ledger: subscription + amount (float) + payment_method + paid_at |
+| `password_history` | Audit trail for web portal password changes |
+| `audit_logs` | General billing audit trail (table changes, admin actions) |
+| `settings` | Key-value config: company info, defaults (trial_days, max_devices) |
 
 ---
 
@@ -353,34 +372,42 @@ curl -X POST http://localhost:8000/api/auth/login \
 ```
 Expected: JWT token in response
 
-### Test 3: RADIUS Authentication (using radclient)
-
-If `radclient` is installed on your host:
+### Test 3: Create Customer + PPPoE + Subscription (end-to-end)
 
 ```bash
-# Test active user (should accept)
-echo "User-Name=test_active, User-Password=testpass123" \
-  | radclient -x localhost:1812 auth testing123 2>&1 | grep "Access-Accept"
+# 1. Login as admin
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin@phantomnet.co.ke","password":"admin123"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-# Test expired user (should reject)
-echo "User-Name=test_expired, User-Password=expired123" \
-  | radclient -x localhost:1812 auth testing123 2>&1 | grep "Access-Reject"
+# 2. Create a customer
+CUST=$(curl -s -X POST http://localhost:8000/api/customers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test User","email":"test@example.com","password":"test1234"}')
+echo "$CUST" | python3 -m json.tool
+
+# 3. Generate PPPoE credentials (permanent — never change)
+PPPOE=$(curl -s -X POST http://localhost:8000/api/customers/2/generate-pppoe \
+  -H "Authorization: Bearer $TOKEN")
+echo "$PPPOE"  # Save the username and password — they won't be shown again
+
+# 4. Create a subscription (trial)
+curl -s -X POST http://localhost:8000/api/subscriptions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":2,"plan_id":1}' | python3 -m json.tool
 ```
 
-### Test 4: RADIUS Test Suite (inside container)
+### Test 4: RADIUS Authentication (using radclient)
+
+If `radclient` is installed, test with the PPPoE credentials generated above:
 
 ```bash
-# Copy test script into container
-docker cp tests/test_radius_auth.sh phantom-radius:/tmp/test_radius_auth.sh
-
-# Run test suite
-docker compose exec freeradius bash /tmp/test_radius_auth.sh localhost
-
-# Expected output:
-# Test 1: Active user 'test_active' should AUTHENTICATE — ✓ PASS
-# Test 2: Expired user 'test_expired' should be REJECTED — ✓ PASS
-# Test 3: Wrong password should be REJECTED — ✓ PASS
-# Test 4: Unknown user should be REJECTED — ✓ PASS
+# Replace user_a1b2c3d4 and e5f6g7h8i9j0 with the actual PPPoE credentials
+echo "User-Name=user_a1b2c3d4, User-Password=e5f6g7h8i9j0" \
+  | radclient -x localhost:1812 auth testing123 2>&1 | grep "Access-Accept"
 ```
 
 ---
@@ -422,38 +449,49 @@ Access:
 ## API Endpoints Summary
 
 ### Authentication
-- `POST /api/auth/login` — Login with email/password or RADIUS credentials
+- `POST /api/auth/login` — Login with email/password or PPPoE credentials (returns JWT + cookie)
+- `GET /api/auth/me` — Get current user info
+- `POST /api/auth/logout` — Clear auth cookie
 
-### Customers (Admin only)
-- `GET /api/customers` — List all customers
+### Customers (Admin CRUD)
+- `GET /api/customers` — List customers (supports `?search=` filter)
 - `POST /api/customers` — Create customer
 - `GET /api/customers/{id}` — Get customer details
 - `PUT /api/customers/{id}` — Update customer
-- `DELETE /api/customers/{id}` — Delete customer
+- `DELETE /api/customers/{id}` — Delete customer (checks no active subs)
+- `GET /api/customers/{id}/detail` — Full detail: customer + subs + PPPoE credentials
+- `POST /api/customers/{id}/generate-pppoe` — Generate permanent PPPoE credentials
+- `PUT /api/customers/{id}/change-password` — Change web portal password
 
 ### Subscriptions
-- `GET /api/subscriptions` — List subscriptions (filtered by user)
-- `POST /api/subscriptions` — Create subscription
-- `GET /api/subscriptions/{id}` — Get subscription details
-- `PUT /api/subscriptions/{id}` — Update subscription
-- `DELETE /api/subscriptions/{id}` — Cancel subscription
+- `GET /api/subscriptions` — List subscriptions (filtered by user role)
+- `POST /api/subscriptions` — Create subscription (customer must have PPPoE credentials)
+- `GET /api/subscriptions/{id}/status` — Subscription status with device count
+- `GET /api/subscriptions/my-credentials` — Customer's own subs with PPPoE credentials
 
 ### Payments
-- `POST /api/payments` — Record payment and extend subscription
-- `GET /api/payments` — List payments
+- `POST /api/payments/simulate` — Record payment and extend subscription (uses SQL function)
+- `GET /api/payments` — List payments (filtered by user role)
 
-### Internet Packages (Admin only)
-- `GET /api/packages` — List all packages
-- `POST /api/packages` — Create package
-- `PUT /api/packages/{id}` — Update package
-- `DELETE /api/packages/{id}` — Delete package
+### Internet Packages (Admin CRUD)
+- `GET /api/packages` — List plans (admins see all, customers see active)
+- `POST /api/packages` — Create plan (auto-generates group_name, syncs to RADIUS)
+- `PUT /api/packages/{id}` — Update plan (auto-syncs to RADIUS group tables)
+- `DELETE /api/packages/{id}` — Delete plan (blocked if subscriptions exist)
 
 ### Live Sessions
-- `GET /api/sessions` — List active RADIUS sessions
+- `GET /api/sessions/live` — Active RADIUS sessions (acct stopped is null)
+- `GET /api/sessions/auth-log` — Recent RADIUS auth attempts
 
-### Settings (Admin only)
-- `GET /api/settings` — Get company settings
-- `PUT /api/settings` — Update settings
+### Dashboard
+- `GET /api/dashboard/stats` — Admin summary: customers, active/expired subs, live sessions, revenue
+
+### Settings (Admin)
+- `GET /api/settings` — Get company settings (public)
+- `PUT /api/settings` — Update company settings
+
+### MCP (AI Assistant)
+- `GET /api/mcp` — MCP HTTP endpoint for LLM tool access (exposes dashboard_stats, list_customers, get_customer)
 
 Full API documentation: http://localhost:8000/docs (interactive Swagger UI)
 
@@ -487,8 +525,17 @@ curl -X POST http://localhost:8000/api/customers \
   -d '{
     "name": "John Doe",
     "email": "john@example.com",
-    "phone": "+254712345678"
+    "phone": "+254712345678",
+    "password": "temp1234"
   }'
+```
+
+### Generate PPPoE Credentials (required before creating a subscription)
+```bash
+curl -X POST http://localhost:8000/api/customers/1/generate-pppoe \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+# Returns: {"credential_id": 1, "username": "user_a1b2c3d4", "password": "e5f6g7h8i9j0"}
+# These credentials are permanent and never change.
 ```
 
 ### Create a Subscription for a Customer
@@ -498,20 +545,19 @@ curl -X POST http://localhost:8000/api/subscriptions \
   -H "Content-Type: application/json" \
   -d '{
     "customer_id": 1,
-    "plan_id": 1,
-    "username": "john_doe",
-    "password": "wifipass123"
+    "plan_id": 1
   }'
+# Note: No username/password — those come from PPPoE credentials
 ```
 
 ### Record a Payment (extends subscription by 1 month)
 ```bash
-curl -X POST http://localhost:8000/api/payments \
+curl -X POST http://localhost:8000/api/payments/simulate \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "subscription_id": 1,
-    "amount_cents": 150000,
+    "amount": 1000,
     "payment_method": "cash",
     "notes": "Monthly renewal"
   }'
@@ -519,7 +565,7 @@ curl -X POST http://localhost:8000/api/payments \
 
 ### Get Active Sessions
 ```bash
-curl http://localhost:8000/api/sessions \
+curl http://localhost:8000/api/sessions/live \
   -H "Authorization: Bearer <ADMIN_TOKEN>"
 ```
 
@@ -548,8 +594,8 @@ docker compose logs freeradius
 # Verify RADIUS_KEY in .env matches config/freeradius/clients.conf
 grep secret config/freeradius/clients.conf
 
-# Test connectivity
-docker compose exec freeradius radtest test_active testpass123 localhost 0 testing123
+# Test connectivity with a customer's PPPoE credentials
+docker compose exec freeradius radtest user_a1b2c3d4 e5f6g7h8i9j0 localhost 0 testing123
 ```
 
 ### API Can't Connect to Database
@@ -643,12 +689,18 @@ LIMIT 10;
 
 ## Notes for New Developers
 
-1. **Database is auto-initialized** on first `docker compose up`. Seeds include test users and packages.
-2. **API auto-seeds** defaults on startup if tables are empty. See `api/app/main.py` startup function.
-3. **Vite proxy** in dev mode forwards `/api/*` calls to the FastAPI backend. No CORS issues in dev.
-4. **JWT tokens** are issued on login and stored in browser localStorage. Middleware verifies tokens on protected routes.
-5. **RADIUS expiration** is handled by `rlm_expiration` module, which rejects users with past `Expiration` attribute in `radcheck`.
-6. **Session tracking** is read from `radacct` table. No session table exists; RADIUS accounting is the source of truth.
+1. **Database is auto-initialized** on first `docker compose up`. Seeds include settings, plans, and admin user.
+2. **API auto-seeds** on startup if tables are empty. See `api/app/main.py` startup function (seeds settings, plans, admin).
+3. **PPPoE credentials are permanent** — each customer gets one set of PPPoE credentials that never change. Credentials are generated via `POST /api/customers/{id}/generate-pppoe` (uses a SQL function). Subscriptions no longer carry a username/password — they reference the plan and the customer's PPPoE credentials.
+4. **RADIUS group sync is automatic** — PostgreSQL triggers `sync_plan_to_radius()` on plan INSERT/UPDATE and `trg_sync_subscription_to_radius()` on subscription changes. Plan bandwidth, session timeout, and simultaneous-use limits are pushed to `radgroupcheck`/`radgroupreply`.
+5. **Payments use a SQL function** — `create_subscription_from_payment()` handles trial→active, monthly renewal, and plan changes as a single atomic operation.
+6. **Vite proxy** in dev mode forwards `/api/*` calls to the FastAPI backend. No CORS issues in dev.
+7. **JWT tokens** are issued on login and stored in browser localStorage + HTTP-only cookie. Middleware verifies tokens on protected routes.
+8. **Login supports both methods** — email/password (web portal) OR PPPoE username/password (RADIUS-style direct login to the web app).
+9. **MCP endpoint** at `/api/mcp` exposes the API as Model Context Protocol tools. AI assistants can call `dashboard_stats`, `list_customers`, and `get_customer` through this endpoint.
+10. **RADIUS expiration** is handled by `rlm_expiration` module, which rejects users with past `Expiration` attribute in `radcheck`. Expiration is synced from the subscription's `current_period_end`.
+11. **Session tracking** is read from `radacct` table. No session table exists; RADIUS accounting is the source of truth.
+12. **Secret configuration** — `JWT_SECRET` has a hardcoded fallback in `config.py` and `docker-compose.yml`. Change it in `.env` for any non-local deployment.
 
 ---
 
