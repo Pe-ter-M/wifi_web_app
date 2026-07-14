@@ -1,4 +1,7 @@
 """Package/plan management (admin CRUD)."""
+import secrets
+import string
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -13,7 +16,7 @@ router = APIRouter(prefix="/api/packages", tags=["packages"])
 @router.get("", response_model=list[PlanResponse])
 async def list_packages(
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),  # any authenticated user
+    user: dict = Depends(get_current_user),
 ):
     """List available packages. Admins see all, customers see active ones."""
     if user["is_admin"]:
@@ -30,25 +33,32 @@ async def create_package(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
+    """Create a new plan. group_name auto-generates if not provided."""
+    group_name = body.group_name
+    if not group_name:
+        # Auto-generate unique group name
+        group_name = "plan_" + "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+
     result = db.execute(
         text("""
-            INSERT INTO plans (name, description, price_cents, price_display,
+            INSERT INTO plans (name, group_name, description, price,
                    bandwidth_up, bandwidth_down, session_timeout, idle_timeout,
-                   is_active, sort_order)
-            VALUES (:name, :desc, :price_cents, :price_display,
+                   simultaneous_use, is_active, sort_order)
+            VALUES (:name, :group_name, :desc, :price,
                     :bw_up, :bw_down, :session_to, :idle_to,
-                    :active, :sort)
+                    :sim_use, :active, :sort)
             RETURNING *
         """),
         {
             "name": body.name,
+            "group_name": group_name,
             "desc": body.description,
-            "price_cents": body.price_cents,
-            "price_display": body.price_display,
+            "price": body.price,
             "bw_up": body.bandwidth_up,
             "bw_down": body.bandwidth_down,
             "session_to": body.session_timeout,
             "idle_to": body.idle_timeout,
+            "sim_use": body.simultaneous_use,
             "active": body.is_active,
             "sort": body.sort_order,
         },
@@ -64,6 +74,7 @@ async def update_package(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
+    """Update a plan. Triggers auto-sync to RADIUS."""
     updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if not updates:
         raise HTTPException(400, "No fields to update")
@@ -88,13 +99,19 @@ async def delete_package(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
+    """Delete a plan. Only works if no subscriptions use it."""
     # Check if any subscriptions use this plan
     count = db.execute(
         text("SELECT COUNT(*) FROM subscriptions WHERE plan_id = :pid"),
         {"pid": plan_id},
-    )
-    if count.scalar() > 0:
+    ).scalar()
+    if count > 0:
         raise HTTPException(400, "Cannot delete a plan with active subscriptions. Deactivate it instead.")
+
+    # Clean up RADIUS group data
+    db.execute(text("SELECT cleanup_plan_radius(:pid)"), {"pid": plan_id})
+    
+    # Delete the plan
     db.execute(text("DELETE FROM plans WHERE id = :id"), {"id": plan_id})
     db.commit()
     return None

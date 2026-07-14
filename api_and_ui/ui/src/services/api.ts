@@ -34,14 +34,15 @@ export const settingsApi = {
   get: () =>
     api.get<{ company: CompanyInfo; defaults: Record<string, unknown> }>('/settings').then(r => r.data),
   update: (company: CompanyInfo) =>
-    api.put('/settings', company).then(r => r.data),
+    api.put('/settings', { company }).then(r => r.data),
 };
 
 // ── Packages ──────────────────────────────────────────────
 export const packagesApi = {
   list: () =>
     api.get<Plan[]>('/packages').then(r => r.data),
-  create: (data: Omit<Plan, 'id'>) =>
+  // ⚠️ Changed: uses Plan type with price, group_name, simultaneous_use
+  create: (data: Omit<Plan, 'id' | 'created_at'>) =>
     api.post<Plan>('/packages', data).then(r => r.data),
   update: (id: number, data: Partial<Plan>) =>
     api.put<Plan>(`/packages/${id}`, data).then(r => r.data),
@@ -63,8 +64,9 @@ export const customersApi = {
     api.delete(`/customers/${id}`),
   detail: (id: number) =>
     api.get<any>(`/customers/${id}/detail`).then(r => r.data),
+  // ⚠️ Changed: Uses SQL function for PPPoE generation
   generatePppoe: (id: number) =>
-    api.post<any>(`/customers/${id}/generate-pppoe`).then(r => r.data),
+    api.post<{ credential_id: number; username: string; password: string }>(`/customers/${id}/generate-pppoe`).then(r => r.data),
   changePassword: (id: number, password: string) =>
     api.put(`/customers/${id}/change-password`, { password }).then(r => r.data),
 };
@@ -73,17 +75,20 @@ export const customersApi = {
 export const subscriptionsApi = {
   list: () =>
     api.get<Subscription[]>('/subscriptions').then(r => r.data),
-  create: (data: { customer_id: number; plan_id: number; username?: string; password?: string }) =>
-    api.post('/subscriptions', data).then(r => r.data),
+  // ⚠️ Changed: No username/password - those are in PPPoE credentials
+  create: (data: { customer_id: number; plan_id: number }) =>
+    api.post<{ subscription_id: number; username: string; plan: string; price: number; status: string; expires_at: string; trial_days: number }>('/subscriptions', data).then(r => r.data),
   status: (id: number) =>
     api.get<SubscriptionStatus>(`/subscriptions/${id}/status`).then(r => r.data),
+  // ⚠️ Changed: Returns MyCredential[] with new field names
   myCredentials: () =>
     api.get<MyCredential[]>('/subscriptions/my-credentials').then(r => r.data),
 };
 
 // ── Payments ──────────────────────────────────────────────
 export const paymentsApi = {
-  simulate: (data: { subscription_id: number; plan_id?: number; amount_cents?: number }) =>
+  // ⚠️ Changed: amount_cents → amount
+  simulate: (data: { subscription_id: number; plan_id?: number; amount?: number }) =>
     api.post<Payment>('/payments/simulate', data).then(r => r.data),
   list: (subscription_id?: number) =>
     api.get<Payment[]>('/payments', { params: { subscription_id } }).then(r => r.data),

@@ -21,7 +21,7 @@ export default function PackageCard({ plan, selected, onSelect, currencySymbol =
     >
       <h3 className="text-lg font-bold text-gray-800">{plan.name}</h3>
       <p className="text-2xl font-extrabold text-indigo-600 mt-1">
-        {currencySymbol} {plan.price_display ?? (plan.price_cents / 100).toFixed(0)}
+        {currencySymbol} {plan.price}
         <span className="text-sm font-normal text-gray-400">/mo</span>
       </p>
       {plan.description && (
@@ -30,7 +30,7 @@ export default function PackageCard({ plan, selected, onSelect, currencySymbol =
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
         <span className="bg-gray-100 px-2 py-1 rounded">⬇ {mbps} Mbps</span>
         <span className="bg-gray-100 px-2 py-1 rounded">⬆ {mbps} Mbps</span>
-        <span className="bg-gray-100 px-2 py-1 rounded">1 device</span>
+        <span className="bg-gray-100 px-2 py-1 rounded">{plan.simultaneous_use || 1} device{(plan.simultaneous_use || 1) > 1 ? 's' : ''}</span>
       </div>
     </div>
   );

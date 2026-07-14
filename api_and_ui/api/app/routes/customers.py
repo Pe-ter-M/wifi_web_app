@@ -16,7 +16,14 @@ async def list_customers(
     admin: dict = Depends(require_admin),
     search: str = Query(None),
 ):
-    query = "SELECT * FROM customers WHERE is_admin = false"
+    query = """
+        SELECT c.*, 
+               CASE WHEN p.id IS NOT NULL THEN true ELSE false END as has_pppoe,
+               p.username as pppoe_username
+        FROM customers c
+        LEFT JOIN pppoe_credentials p ON p.customer_id = c.id
+        WHERE c.is_admin = false
+    """
     if search:
         query += " AND (name ILIKE :search OR email ILIKE :search OR phone ILIKE :search)"
     query += " ORDER BY id"
@@ -45,17 +52,26 @@ async def get_customer_detail(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
-    """Full customer info + all subscriptions with live status."""
+    """Full customer info + subscriptions + PPPoE credentials."""
     from datetime import datetime, timezone
+
     cust = db.execute(text("SELECT * FROM customers WHERE id = :id"), {"id": customer_id}).one_or_none()
     if not cust:
         raise HTTPException(404, "Customer not found")
 
+    # Get PPPoE credentials
+    pppoe = db.execute(
+    text("SELECT username, password, is_active FROM pppoe_credentials WHERE customer_id = :cid"),
+    {"cid": customer_id}
+).one_or_none()
+
+    # Get subscriptions
     subs = db.execute(text("""
-        SELECT s.*, p.name as plan_name, p.price_display, p.bandwidth_down, p.bandwidth_up
+        SELECT s.*, p.name as plan_name, p.price, p.bandwidth_down, p.bandwidth_up,
+               p.simultaneous_use as max_devices
         FROM subscriptions s
         JOIN plans p ON p.id = s.plan_id
-        WHERE s.customer_id = :cid ORDER BY s.id
+        WHERE s.customer_id = :cid ORDER BY s.id DESC
     """), {"cid": customer_id}).fetchall()
 
     now = datetime.now(timezone.utc)
@@ -64,26 +80,34 @@ async def get_customer_detail(
         end = s.current_period_end
         if end and end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
-        is_active = s.status == "active" and (end > now if end else False)
-        dev_count = db.execute(
-            text("SELECT COUNT(*) FROM radacct WHERE UserName = :u AND AcctStopTime IS NULL"),
-            {"u": s.username},
-        ).scalar() or 0
-        last_auth = db.execute(
-            text("SELECT authdate FROM radpostauth WHERE username = :u ORDER BY authdate DESC LIMIT 1"),
-            {"u": s.username},
-        ).one_or_none()
+        is_active = s.status in ("active", "trial") and (end > now if end else False)
+
+        # Get device count from radacct using PPPoE username
+        dev_count = 0
+        last_auth = None
+        if pppoe:
+            dev_count = db.execute(
+                text("SELECT COUNT(*) FROM radacct WHERE UserName = :u AND AcctStopTime IS NULL"),
+                {"u": pppoe.username},
+            ).scalar() or 0
+            last_auth = db.execute(
+                text("SELECT authdate FROM radpostauth WHERE username = :u ORDER BY authdate DESC LIMIT 1"),
+                {"u": pppoe.username},
+            ).one_or_none()
 
         sub_list.append({
-            "id": s.id, "username": s.username, "password": s.password,
-            "status": s.status, "plan_name": s.plan_name,
-            "price_display": s.price_display,
+            "id": s.id,
+            "username": pppoe.username if pppoe else None,
+            "status": s.status,
+            "plan_name": s.plan_name,
+            "price": s.price,
             "bandwidth": f"{s.bandwidth_down // 1024} Mbps" if s.bandwidth_down else "-",
             "current_period_start": s.current_period_start.isoformat() if s.current_period_start else None,
             "current_period_end": end.isoformat() if end else None,
             "is_active": is_active,
             "days_remaining": max(0, (end - now).days) if end else 0,
             "device_count": dev_count,
+            "max_devices": s.max_devices or 1,
             "last_seen": last_auth.authdate.isoformat() if last_auth else None,
         })
 
@@ -93,6 +117,12 @@ async def get_customer_detail(
             "phone": cust.phone, "address": cust.address,
             "is_admin": cust.is_admin,
             "created_at": cust.created_at.isoformat() if cust.created_at else None,
+        },
+        "pppoe": {
+            "username": pppoe.username if pppoe else None,
+            "password": pppoe.password if pppoe else None,  
+            "is_active": pppoe.is_active if pppoe else False,
+            "has_credentials": pppoe is not None,
         },
         "subscriptions": sub_list,
     }
@@ -104,8 +134,8 @@ async def create_customer(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
-    if not body.name or not body.email or not body.phone:
-        raise HTTPException(400, "Name, email, and phone are required")
+    if not body.name or not body.email:
+        raise HTTPException(400, "Name and email are required")
     if not body.password or len(body.password) < 4:
         raise HTTPException(400, "Password is required and must be at least 4 characters")
 
@@ -153,19 +183,26 @@ async def delete_customer(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
-    """Delete customer and remove all FreeRADIUS entries."""
-    usernames = db.execute(
-        text("SELECT username FROM subscriptions WHERE customer_id = :cid"),
+    """Delete customer using SQL function that cleans all related data."""
+    # Check for active subscriptions first
+    active = db.execute(
+        text("SELECT COUNT(*) FROM subscriptions WHERE customer_id = :cid AND status IN ('active', 'trial')"),
         {"cid": customer_id},
-    ).fetchall()
-    for row in usernames:
-        u = row.username
-        db.execute(text("DELETE FROM radcheck WHERE UserName = :u"), {"u": u})
-        db.execute(text("DELETE FROM radreply WHERE UserName = :u"), {"u": u})
-        db.execute(text("DELETE FROM radusergroup WHERE UserName = :u"), {"u": u})
-    db.execute(text("DELETE FROM subscriptions WHERE customer_id = :cid"), {"cid": customer_id})
-    db.execute(text("DELETE FROM customers WHERE id = :id"), {"id": customer_id})
+    ).scalar()
+    if active > 0:
+        raise HTTPException(400, "Cannot delete customer with active subscriptions. Deactivate them first.")
+
+    # Use the SQL function for complete cleanup
+    result = db.execute(
+        text("SELECT delete_customer(:cid)"),
+        {"cid": customer_id},
+    )
     db.commit()
+    
+    row = result.one_or_none()
+    if row and row[0] and row[0].get("error"):
+        raise HTTPException(404, row[0]["error"])
+    
     return None
 
 
@@ -175,52 +212,32 @@ async def generate_pppoe(
     db: Session = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
-    """Generate one-time PPPoE credentials for a customer without a plan.
-    Creates a subscription with a 1-hour trial session."""
-    import secrets, string, datetime
-    from sqlalchemy import text
-
+    """Generate permanent PPPoE credentials for a customer.
+    Uses the SQL function generate_pppoe_credentials."""
+    
     cust = db.execute(text("SELECT * FROM customers WHERE id = :id"), {"id": customer_id}).one_or_none()
     if not cust:
         raise HTTPException(404, "Customer not found")
 
-    # Check if they already have an active subscription
-    existing = db.execute(
-        text("SELECT id FROM subscriptions WHERE customer_id = :cid AND status = 'active' AND current_period_end > now() LIMIT 1"),
+    result = db.execute(
+        text("SELECT generate_pppoe_credentials(:cid)"),
         {"cid": customer_id},
-    ).one_or_none()
-    if existing:
-        raise HTTPException(400, "Customer already has an active subscription")
-
-    username = "user_" + "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
-    password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
-    now = datetime.datetime.now(datetime.timezone.utc)
-    expires = now + datetime.timedelta(hours=1)
-
-    db.execute(
-        text("""
-            INSERT INTO subscriptions (customer_id, plan_id, username, password,
-                   current_period_start, current_period_end, status)
-            VALUES (:cid, (SELECT id FROM plans ORDER BY id LIMIT 1), :u, :pw, :start, :end, 'active')
-        """),
-        {"cid": customer_id, "u": username, "pw": password, "start": now, "end": expires},
-    )
-    db.execute(
-        text("""
-            INSERT INTO radcheck (UserName, Attribute, op, Value) VALUES
-            (:u, 'Cleartext-Password', ':=', :pw),
-            (:u, 'Expiration', ':=', :exp),
-            (:u, 'Simultaneous-Use', ':=', '1')
-        """),
-        {"u": username, "pw": password, "exp": expires.strftime("%d %b %Y %H:%M:%S")},
-    )
-    db.execute(
-        text("INSERT INTO radreply (UserName, Attribute, op, Value) VALUES (:u, 'Session-Timeout', ':=', '3600')"),
-        {"u": username},
     )
     db.commit()
-
-    return {"username": username, "password": password, "expires_at": expires.isoformat(), "trial": True}
+    
+    row = result.one_or_none()
+    if row and row[0]:
+        data = row[0]
+        if data.get("error"):
+            raise HTTPException(400, data["error"])
+        return {
+            "credential_id": data["credential_id"],
+            "username": data["username"],
+            "password": data["password"],
+            "message": "Save these credentials — they will NOT be shown again"
+        }
+    
+    raise HTTPException(500, "Failed to generate credentials")
 
 
 @router.put("/{customer_id}/change-password", response_model=dict)

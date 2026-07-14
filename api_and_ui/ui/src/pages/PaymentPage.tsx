@@ -108,12 +108,12 @@ export default function PaymentPage() {
           ))}
         </div>
 
-        {selectedPlan && (
+       {selectedPlan && (
           <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
             <h3 className="text-lg font-semibold mb-3">Order Summary</h3>
             <div className="flex justify-between text-sm">
               <span>Plan: <strong>{selectedPlan.name}</strong></span>
-              <span className="font-bold">{company?.currency_symbol} {selectedPlan.price_display ?? (selectedPlan.price_cents / 100).toFixed(0)}</span>
+              <span className="font-bold">{company?.currency_symbol} {selectedPlan.price}</span>
             </div>
             <div className="flex justify-between text-sm mt-2">
               <span>Duration</span>
@@ -126,7 +126,7 @@ export default function PaymentPage() {
             <hr className="my-3" />
             <div className="flex justify-between font-bold text-lg">
               <span>Total</span>
-              <span className="text-indigo-600">{company?.currency_symbol} {selectedPlan.price_display ?? (selectedPlan.price_cents / 100).toFixed(0)}</span>
+              <span className="text-indigo-600">{company?.currency_symbol} {selectedPlan.price}</span>
             </div>
             <button
               onClick={handlePay}
@@ -140,7 +140,7 @@ export default function PaymentPage() {
                   : 'Pay Now (Simulated)'}
             </button>
             <p className="text-xs text-gray-400 text-center mt-2">
-              This is a simulated payment. Clicking "Pay Now" will directly update your subscription in the database.
+              This is a simulated payment. Clicking "Pay Now" will directly update your subscription.
             </p>
           </div>
         )}
